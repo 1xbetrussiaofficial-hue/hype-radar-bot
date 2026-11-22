@@ -1,7 +1,6 @@
 import os
 import requests
 import freeaipi
-from telegram import Bot
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -24,23 +23,27 @@ def generate_token_names(title):
 Génère exactement 3 noms de tokens courts, mémorables et accrocheurs (max 3 mots chacun).
 Format de réponse attendu : une liste simple, un nom par ligne, sans numérotation ni explication."""
     try:
-        # Utilisation de la bonne méthode de freeaipi
         response = freeaipi.chat(prompt)
-        
-        # Selon la version de freeaipi, la réponse peut être un objet ou une chaîne directe
         text_response = response.content if hasattr(response, 'content') else str(response)
-        
         return [name.strip() for name in text_response.split("\n") if name.strip()][:3]
     except Exception as e:
         print(f"Erreur génération IA : {e}")
         return []
 
 def send_to_telegram(message):
-    """Envoie le message formaté sur ton canal Telegram."""
-    bot = Bot(token=TELEGRAM_TOKEN)
+    """Envoie le message via l'API directe de Telegram (plus fiable)."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
     try:
-        bot.send_message(chat_id=CHAT_ID, text=message, parse_mode="Markdown")
-        print("Message envoyé avec succès !")
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            print("Message envoyé avec succès !")
+        else:
+            print(f"Erreur envoi Telegram : {response.text}")
     except Exception as e:
         print(f"Erreur envoi Telegram : {e}")
 
