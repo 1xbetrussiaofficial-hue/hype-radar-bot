@@ -19,12 +19,19 @@ def get_news():
 
 def generate_token_names(title):
     """Demande à une IA gratuite de générer des noms de memecoins."""
-    prompt = f"""Tu es un expert en memecoins. Basé sur ce titre d'actualité : "{title}"
-Génère exactement 3 noms de tokens courts, mémorables et accrocheurs (max 3 mots chacun).
-Format de réponse attendu : une liste simple, un nom par ligne, sans numérotation ni explication."""
+    prompt = f"""Tu es un trader de memecoins expert et un génie du marketing. 
+Basé sur cette actualité : "{title}"
+Génère exactement 3 concepts de memecoins.
+Pour chaque concept, donne un nom (max 2 mots) suivi d'un Ticker (symbole de 3 à 5 lettres en majuscules avec un $).
+Sois très court, accrocheur, et utilise l'humour ou l'exagération typique des memecoins.
+Format attendu (un par ligne, sans explication) : Nom du Token ($TICKER)"""
+    
     try:
         response = freeaipi.chat(prompt)
+        
+        # Selon la version de freeaipi, la réponse peut être un objet ou une chaîne directe
         text_response = response.content if hasattr(response, 'content') else str(response)
+        
         return [name.strip() for name in text_response.split("\n") if name.strip()][:3]
     except Exception as e:
         print(f"Erreur génération IA : {e}")
