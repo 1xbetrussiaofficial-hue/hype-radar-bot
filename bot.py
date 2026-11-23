@@ -1,92 +1,92 @@
 import os
 import requests
-import freeaipi
 import feedparser
+from openai import OpenAI
 
+# Configuration Telegram
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
+# Configuration GitHub Models (IA Puissante et Gratuite)
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+client = OpenAI(
+    base_url="https://models.inference.ai.azure.com",
+    api_key=GITHUB_TOKEN,
+)
+
 def get_news():
-    """Récupère les news de plusieurs sources (Crypto + Buzz US)."""
     articles = []
     
-    # 1. L'API Crypto
+    # 1. L'API Crypto (avec gestion d'erreur stricte)
     try:
-        url = "https://cryptocurrency.cv/api/news?limit=3"
+        url = "https://cryptocurrency.cv/api/news?limit=5"
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
-            data = response.json()
-            articles.extend(data.get("articles", []))
+            for art in response.json().get("articles", []):
+                articles.append({"title": art.get("title"), "link": art.get("link")})
     except Exception as e:
-        print(f"Erreur API Crypto (ignorée) : {e}")
+        print(f"API Crypto HS (on continue) : {e}")
 
-    # 2. Google News US : Divertissement
-    try:
-        rss_url = "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-US&gl=US&ceid=US:en"
-        feed = feedparser.parse(rss_url)
-        for entry in feed.entries[:3]:
-            articles.append({"title": entry.title, "link": entry.link})
-    except Exception as e:
-        print(f"Erreur Google Divertissement : {e}")
+    # 2. Google News (People, Sport, Tech)
+    urls = [
+        "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en"
+    ]
+    
+    for url in urls:
+        try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:4]: # On prend les 4 premières de chaque
+                articles.append({"title": entry.title, "link": entry.link})
+        except Exception as e:
+            print(f"Erreur RSS {url} : {e}")
 
-    # 3. Google News US : Sports
-    try:
-        rss_url = "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-US&gl=US&ceid=US:en"
-        feed = feedparser.parse(rss_url)
-        for entry in feed.entries[:3]:
-            articles.append({"title": entry.title, "link": entry.link})
-    except Exception as e:
-        print(f"Erreur Google Sport : {e}")
-        
-    # 4. Google News US : Technologie
-    try:
-        rss_url = "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en"
-        feed = feedparser.parse(rss_url)
-        for entry in feed.entries[:3]:
-            articles.append({"title": entry.title, "link": entry.link})
-    except Exception as e:
-        print(f"Erreur Google Tech : {e}")
-
-    return articles
+    # PRÉ-FILTRE "BÉTON" : On rejette les news de trading/finance inutiles avant l'IA
+    bad_keywords = ["price", "analysis", "forecast", "trading", "technical", "chart", "ether", "bitcoin", "xrp", "solana"]
+    clean_articles = []
+    
+    for art in articles:
+        title_lower = art["title"].lower()
+        if not any(bad_word in title_lower for bad_word in bad_keywords):
+            clean_articles.append(art)
+            
+    return clean_articles
 
 def analyze_and_generate(title):
-    """L'IA décide si la news est un bon meme ou pas."""
-    prompt = f"""Tu es un expert en memecoins sur Twitter. Je vais te donner un titre de news US.
-Ton but est de générer des noms de memecoins pour les news qui peuvent faire le buzz.
+    """Utilise GPT-4o-mini via GitHub Models pour une analyse parfaite."""
+    
+    prompt = f"""Tu es un trader de memecoins de génie sur Twitter. 
+Analyse ce titre de news US : "{title}"
 
-Les BONNES news pour un memecoin (Génère des noms) : Célébrités (Taylor Swift, Drake), Clashs, Sports US (NFL, NBA), Tech (Elon Musk, Apple, IA), Politique absurde, ou Faits divers bizarres. Sois généreux, on cherche du buzz !
+RÈGLES :
+1. Si la news parle de célébrité (Miley, Drake, Taylor), de sport US (NFL, NBA), de tech (Elon, Apple), ou d'un fait divers absurde, c'est un EXCELLENT candidat pour un memecoin.
+2. Si c'est de la politique lourde (élections), de la guerre, ou de la finance, c'est NUL.
 
-Les MAUVAISES news (À IGNORER) : La finance ennuyeuse, les analyses de trading, la météo, les tragédies, les prix du pétrole.
-
-Si la news est mauvaise, réponds UNIQUEMENT par le mot : IGNORE
-Si la news est bonne, génère 3 concepts de memecoins. Donne un nom (max 2 mots) suivi d'un Ticker (3 à 5 lettres en majuscules avec un $).
-Sois créatif et un peu absurde, comme sur Crypto Twitter !
-
-Format attendu si la news est bonne (sans explication, juste ce format) :
-Nom du Token ($TICKER)
-Titre : "{title}"
+Si c'est NUL, renvoie un JSON vide : {{"tokens": []}}
+Si c'est EXCELLENT, génère 3 memecoins. Format JSON strict :
+{{"tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, {{"name": "Nom", "ticker": "$TICKER"}}, {{"name": "Nom", "ticker": "$TICKER"}}]}}
 """
     
     try:
-        response = freeaipi.chat(prompt)
-        text_response = response.content if hasattr(response, 'content') else str(response)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini", # Le modèle ultra-puissant de GitHub
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            response_format={ "type": "json_object" } # Force l'IA à répondre en JSON
+        )
         
-        if "IGNORE" in text_response:
-            print(f"❌ Ignorée : {title}")
-            return None
-            
-        return [name.strip() for name in text_response.split("\n") if name.strip() and "$" in name][:3]
+        import json
+        result = json.loads(response.choices[0].message.content)
+        return result.get("tokens", [])
+        
     except Exception as e:
         print(f"Erreur IA : {e}")
-        return None
+        return []
 
 def send_to_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
+    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
     try:
         requests.post(url, json=payload)
     except Exception as e:
@@ -94,29 +94,29 @@ def send_to_telegram(message):
 
 def main():
     articles = get_news()
-    if not articles:
-        print("Aucune news récupérée.")
-        return
-
-    print(f"🔎 Analyse de {len(articles)} news en cours (Crypto + People + Sport + Tech)...")
+    print(f"🔎 Analyse de {len(articles)} news ultra-filtrées...")
 
     for article in articles:
-        title = article.get("title", "Titre inconnu")
-        link = article.get("link", "")
+        title = article["title"]
+        link = article["link"]
 
-        names = analyze_and_generate(title)
+        tokens = analyze_and_generate(title)
         
-        if not names:
+        # Si l'IA a jugé que c'était nul, elle renvoie une liste vide, on passe.
+        if not tokens:
             continue
 
-        message = f"🔥 *ALERTE HYPE MAXIMALE* 🔥\n\n"
+        # Si on a des tokens, on envoie le message
+        message = f"🚨 *SIGNAL HYPE DÉTECTÉ* 🚨\n\n"
         message += f"*{title}*\n"
-        message += f"[Lire l'article]({link})\n\n"
-        message += f"💡 *Noms de tokens suggérés :*\n"
-        for name in names:
-            message += f"• `{name}`\n"
+        message += f"[Lien de la news]({link})\n\n"
+        message += f"💡 *Tokens à sniper :*\n"
+        
+        for t in tokens:
+            message += f"• *{t['name']}* (`{t['ticker']}`)\n"
 
         send_to_telegram(message)
+        print(f"✅ Message envoyé pour : {title}")
 
 if __name__ == "__main__":
     main()
