@@ -1,14 +1,14 @@
 import os
 import requests
+import json
 from openai import OpenAI
 from trendspyg import download_google_trends_rss
-import json
 
-# --- Configuration ---
+# --- Configuration Telegram ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# Client GitHub Models
+# --- Configuration GitHub Models (IA Gratuite et Stable) ---
 client = OpenAI(
     base_url="https://models.github.ai/inference",
     api_key=os.environ.get("GITHUB_TOKEN"),
@@ -19,7 +19,7 @@ def get_real_trends():
     print("📡 Récupération des tendances Google US...")
     trends_list = []
     try:
-        # Nouvelle méthode recommandée : download_google_trends_rss
+        # Récupération via le flux RSS (méthode stable)
         trends = download_google_trends_rss(geo='US')
         # On extrait juste le titre de la tendance
         trends_list = [trend['trend'] for trend in trends]
@@ -44,11 +44,17 @@ Format JSON strict : {{"tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, ...]}}
 """
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="openai/gpt-4o-mini", # Le nom complet requis par GitHub Models
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             response_format={"type": "json_object"},
         )
+        
+        # Sécurité anti-crash
+        if not hasattr(response, 'choices'):
+            print(f"❌ Réponse inattendue de l'API.")
+            return []
+
         result = json.loads(response.choices[0].message.content)
         return result.get("tokens", [])
     except Exception as e:
