@@ -20,11 +20,11 @@ def get_news():
     except Exception as e:
         print(f"Erreur API Crypto (ignorée) : {e}")
 
-    # 2. Google News US : Divertissement (People, Célébrités)
+    # 2. Google News US : Divertissement
     try:
         rss_url = "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-US&gl=US&ceid=US:en"
         feed = feedparser.parse(rss_url)
-        for entry in feed.entries[:3]: # On prend les 3 premières
+        for entry in feed.entries[:3]:
             articles.append({"title": entry.title, "link": entry.link})
     except Exception as e:
         print(f"Erreur Google Divertissement : {e}")
@@ -33,16 +33,16 @@ def get_news():
     try:
         rss_url = "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-US&gl=US&ceid=US:en"
         feed = feedparser.parse(rss_url)
-        for entry in feed.entries[:3]: # On prend les 3 premières
+        for entry in feed.entries[:3]:
             articles.append({"title": entry.title, "link": entry.link})
     except Exception as e:
         print(f"Erreur Google Sport : {e}")
         
-    # 4. Google News US : Technologie (Elon Musk, IA, Apple...)
+    # 4. Google News US : Technologie
     try:
         rss_url = "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en"
         feed = feedparser.parse(rss_url)
-        for entry in feed.entries[:3]: # On prend les 3 premières
+        for entry in feed.entries[:3]:
             articles.append({"title": entry.title, "link": entry.link})
     except Exception as e:
         print(f"Erreur Google Tech : {e}")
@@ -50,17 +50,22 @@ def get_news():
     return articles
 
 def analyze_and_generate(title):
-    """L'IA note la news. Si elle est nulle, elle renvoie None."""
-    prompt = f"""Tu es un trader de memecoins expert qui chasse les tendances virales aux USA.
-Analyse ce titre d'actualité : "{title}"
+    """L'IA décide si la news est un bon meme ou pas."""
+    prompt = f"""Tu es un expert en memecoins sur Twitter. Je vais te donner un titre de news US.
+Ton but est de générer des noms de memecoins pour les news qui peuvent faire le buzz.
 
-ÉTAPE 1 : Note de 1 à 10 le potentiel de cette news pour créer un memecoin qui va faire le buzz (People, Sport, Tech, Clash, Absurdité).
-ÉTAPE 2 : 
-- Si la note est STRICTEMENT INFÉRIEURE à 8, réponds UNIQUEMENT par le mot : IGNORE
-- Si la note est de 8, 9 ou 10, génère 3 concepts de memecoins. Pour chaque concept, donne un nom (max 2 mots) suivi d'un Ticker (3 à 5 lettres en majuscules avec un $).
+Les BONNES news pour un memecoin (Génère des noms) : Célébrités (Taylor Swift, Drake), Clashs, Sports US (NFL, NBA), Tech (Elon Musk, Apple, IA), Politique absurde, ou Faits divers bizarres. Sois généreux, on cherche du buzz !
 
-Format attendu si la note est >= 8 (sans explication, juste ce format) :
-Nom du Token ($TICKER)"""
+Les MAUVAISES news (À IGNORER) : La finance ennuyeuse, les analyses de trading, la météo, les tragédies, les prix du pétrole.
+
+Si la news est mauvaise, réponds UNIQUEMENT par le mot : IGNORE
+Si la news est bonne, génère 3 concepts de memecoins. Donne un nom (max 2 mots) suivi d'un Ticker (3 à 5 lettres en majuscules avec un $).
+Sois créatif et un peu absurde, comme sur Crypto Twitter !
+
+Format attendu si la news est bonne (sans explication, juste ce format) :
+Nom du Token ($TICKER)
+Titre : "{title}"
+"""
     
     try:
         response = freeaipi.chat(prompt)
