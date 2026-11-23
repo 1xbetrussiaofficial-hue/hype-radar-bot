@@ -7,10 +7,10 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 def get_news():
-    """Combine l'API Crypto et Google News US pour avoir un max de news."""
+    """Récupère les news de plusieurs sources (Crypto + Buzz US)."""
     articles = []
     
-    # 1. L'API Crypto (limitée à 3 news par appel gratuit)
+    # 1. L'API Crypto
     try:
         url = "https://cryptocurrency.cv/api/news?limit=3"
         response = requests.get(url, timeout=10)
@@ -18,20 +18,34 @@ def get_news():
             data = response.json()
             articles.extend(data.get("articles", []))
     except Exception as e:
-        print(f"Erreur API Crypto : {e}")
+        print(f"Erreur API Crypto (ignorée) : {e}")
 
-    # 2. Google News US (Top actualités - Politique, Sport, People, etc.)
+    # 2. Google News US : Divertissement (People, Célébrités)
     try:
-        rss_url = "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
+        rss_url = "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-US&gl=US&ceid=US:en"
         feed = feedparser.parse(rss_url)
-        # On prend les 7 premières news pour ne pas surcharger l'IA
-        for entry in feed.entries[:7]:
-            articles.append({
-                "title": entry.title,
-                "link": entry.link
-            })
+        for entry in feed.entries[:3]: # On prend les 3 premières
+            articles.append({"title": entry.title, "link": entry.link})
     except Exception as e:
-        print(f"Erreur Google News : {e}")
+        print(f"Erreur Google Divertissement : {e}")
+
+    # 3. Google News US : Sports
+    try:
+        rss_url = "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-US&gl=US&ceid=US:en"
+        feed = feedparser.parse(rss_url)
+        for entry in feed.entries[:3]: # On prend les 3 premières
+            articles.append({"title": entry.title, "link": entry.link})
+    except Exception as e:
+        print(f"Erreur Google Sport : {e}")
+        
+    # 4. Google News US : Technologie (Elon Musk, IA, Apple...)
+    try:
+        rss_url = "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en"
+        feed = feedparser.parse(rss_url)
+        for entry in feed.entries[:3]: # On prend les 3 premières
+            articles.append({"title": entry.title, "link": entry.link})
+    except Exception as e:
+        print(f"Erreur Google Tech : {e}")
 
     return articles
 
@@ -40,7 +54,7 @@ def analyze_and_generate(title):
     prompt = f"""Tu es un trader de memecoins expert qui chasse les tendances virales aux USA.
 Analyse ce titre d'actualité : "{title}"
 
-ÉTAPE 1 : Note de 1 à 10 le potentiel de cette news pour créer un memecoin qui va exploser (buzz actuel, émotion forte, tendance US, people, sport, politique).
+ÉTAPE 1 : Note de 1 à 10 le potentiel de cette news pour créer un memecoin qui va faire le buzz (People, Sport, Tech, Clash, Absurdité).
 ÉTAPE 2 : 
 - Si la note est STRICTEMENT INFÉRIEURE à 8, réponds UNIQUEMENT par le mot : IGNORE
 - Si la note est de 8, 9 ou 10, génère 3 concepts de memecoins. Pour chaque concept, donne un nom (max 2 mots) suivi d'un Ticker (3 à 5 lettres en majuscules avec un $).
@@ -79,7 +93,7 @@ def main():
         print("Aucune news récupérée.")
         return
 
-    print(f"🔎 Analyse de {len(articles)} news en cours (Crypto + Google US)...")
+    print(f"🔎 Analyse de {len(articles)} news en cours (Crypto + People + Sport + Tech)...")
 
     for article in articles:
         title = article.get("title", "Titre inconnu")
