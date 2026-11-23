@@ -1,33 +1,27 @@
 import os
 import requests
 import json
-from openai import OpenAI
 from trendspyg import download_google_trends_rss
 
-# --- Configuration Telegram ---
+# --- Configuration ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
-# --- Configuration GitHub Models (IA Gratuite et Stable) ---
-client = OpenAI(
-    base_url="https://models.github.ai/inference",
-    api_key=os.environ.get("GITHUB_TOKEN"),
-)
+# Endpoint officiel de GitHub Models
+API_URL = "https://models.github.ai/inference/chat/completions"
 
 def get_real_trends():
     """Récupère les vraies tendances de recherche aux US via Google Trends."""
     print("📡 Récupération des tendances Google US...")
     trends_list = []
     try:
-        # Récupération via le flux RSS (méthode stable)
         trends = download_google_trends_rss(geo='US')
-        # On extrait juste le titre de la tendance
         trends_list = [trend['trend'] for trend in trends]
         print(f"✅ {len(trends_list)} tendances trouvées.")
     except Exception as e:
         print(f"❌ Erreur Google Trends : {e}")
     
-    # On ne garde que les 10 premières pour ne pas surcharger l'IA
     return trends_list[:10]
 
 def analyze_trend_with_ai(trend_title):
@@ -42,23 +36,40 @@ Ta mission :
 3. Si la note est de 8, 9 ou 10, génère 3 memecoins. Donne un nom (max 2 mots) et un Ticker (3-5 lettres avec $).
 Format JSON strict : {{"tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, ...]}}
 """
+    
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "model": "openai/gpt-4o-mini",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+        "response_format": {"type": "json_object"}
+    }
+    
     try:
-        response = client.chat.completions.create(
-            model="openai/gpt-4o-mini", # Le nom complet requis par GitHub Models
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            response_format={"type": "json_object"},
-        )
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
         
-        # Sécurité anti-crash
-        if not hasattr(response, 'choices'):
-            print(f"❌ Réponse inattendue de l'API.")
+        # Affiche le code de statut et la réponse brute en cas de problème
+        if response.status_code != 200:
+            print(f"❌ Erreur API (code {response.status_code}) : {response.text}")
             return []
-
-        result = json.loads(response.choices[0].message.content)
+            
+        data = response.json()
+        
+        # Vérifie que la structure de la réponse est correcte
+        if "choices" not in data:
+            print(f"❌ Réponse inattendue : {data}")
+            return []
+            
+        content = data["choices"][0]["message"]["content"]
+        result = json.loads(content)
         return result.get("tokens", [])
+        
     except Exception as e:
-        print(f"❌ Erreur IA : {e}")
+        print(f"❌ Erreur lors de l'appel IA : {e}")
         return []
 
 def send_to_telegram(message):
