@@ -6,10 +6,10 @@ from trendspyg import download_google_trends_rss
 # --- Configuration ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# Endpoint officiel de GitHub Models
-API_URL = "https://models.github.ai/inference/chat/completions"
+# Endpoint de Groq (compatible OpenAI)
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 def get_real_trends():
     """Récupère les vraies tendances de recherche aux US via Google Trends."""
@@ -25,7 +25,7 @@ def get_real_trends():
     return trends_list[:10]
 
 def analyze_trend_with_ai(trend_title):
-    """Demande à GPT-4o-mini de noter le potentiel memecoin de la tendance."""
+    """Demande à Llama 3 (via Groq) de noter le potentiel memecoin."""
     
     prompt = f"""Tu es un expert en memecoins qui chasse le buzz sur Twitter.
 Voici une tendance de recherche actuelle aux USA : "{trend_title}"
@@ -38,28 +38,26 @@ Format JSON strict : {{"tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, ...]}}
 """
     
     headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
     
     payload = {
-        "model": "openai/gpt-4o-mini",
+        "model": "llama-3.1-8b-instant", # Modèle ultra-rapide et gratuit
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7,
         "response_format": {"type": "json_object"}
     }
     
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+        response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=30)
         
-        # Affiche le code de statut et la réponse brute en cas de problème
         if response.status_code != 200:
             print(f"❌ Erreur API (code {response.status_code}) : {response.text}")
             return []
             
         data = response.json()
         
-        # Vérifie que la structure de la réponse est correcte
         if "choices" not in data:
             print(f"❌ Réponse inattendue : {data}")
             return []
