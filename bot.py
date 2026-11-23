@@ -23,7 +23,6 @@ def get_real_trends():
     return trends_list[:10]
 
 def analyze_trend_with_ai(trend_title):
-    # Nouveau prompt ultra-permissif
     prompt = f"""Tu es un trader de memecoins complètement fou sur Crypto Twitter.
 Voici une tendance de recherche aux USA : "{trend_title}"
 
@@ -40,9 +39,9 @@ Format JSON strict : {{"tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, ...]}}
     }
     
     payload = {
-        "model": "llama-3.3-70b-versatile", # Le modèle le plus intelligent et gratuit
+        "model": "openai/gpt-oss-120b", # Le modèle recommandé et stable
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.8, # Un peu plus de créativité
+        "temperature": 0.8,
         "response_format": {"type": "json_object"}
     }
     
@@ -89,7 +88,7 @@ def main():
         tokens = analyze_trend_with_ai(trend)
         
         if not tokens:
-            print("   ⏭️ Aucun token généré (l'IA a bloqué).")
+            print("   ⏭️ Aucun token généré.")
             continue
 
         message = f"🚨 *SIGNAL HYPE MAXIMALE* 🚨\n\n"
