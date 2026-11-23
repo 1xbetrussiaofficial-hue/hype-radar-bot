@@ -1,14 +1,14 @@
 import os
 import requests
 from openai import OpenAI
-from trendspyg import TrendReq
+from trendspyg import download_google_trends_rss
 import json
 
 # --- Configuration ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# Client GitHub Models (utilise le GITHUB_TOKEN fourni automatiquement)
+# Client GitHub Models
 client = OpenAI(
     base_url="https://models.github.ai/inference",
     api_key=os.environ.get("GITHUB_TOKEN"),
@@ -19,11 +19,10 @@ def get_real_trends():
     print("📡 Récupération des tendances Google US...")
     trends_list = []
     try:
-        # Initialisation de TrendReq (US)
-        pytrends = TrendReq(hl='en-US', tz=360)
-        # Récupère les tendances du jour aux USA
-        trending_searches = pytrends.trending_searches(pn='united_states')
-        trends_list = trending_searches[0].tolist()
+        # Nouvelle méthode recommandée : download_google_trends_rss
+        trends = download_google_trends_rss(geo='US')
+        # On extrait juste le titre de la tendance
+        trends_list = [trend['trend'] for trend in trends]
         print(f"✅ {len(trends_list)} tendances trouvées.")
     except Exception as e:
         print(f"❌ Erreur Google Trends : {e}")
@@ -45,7 +44,7 @@ Format JSON strict : {{"tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, ...]}}
 """
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini", # Modèle ultra-stable de GitHub Models
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             response_format={"type": "json_object"},
@@ -65,7 +64,6 @@ def send_to_telegram(message):
         print(f"❌ Erreur Telegram : {e}")
 
 def main():
-    # 1. On récupère les vraies tendances
     trends = get_real_trends()
     
     if not trends:
@@ -74,17 +72,14 @@ def main():
 
     print(f"🔎 Analyse de {len(trends)} tendances avec l'IA...")
 
-    # 2. On analyse chaque tendance
     for trend in trends:
         print(f"🧐 Analyse : {trend}")
         tokens = analyze_trend_with_ai(trend)
         
-        # Si l'IA a jugé que c'était nul (note < 8), on passe
         if not tokens:
             print("   ⏭️ Ignoré (pas assez fort).")
             continue
 
-        # 3. Si c'est bon, on envoie l'alerte
         message = f"🚨 *SIGNAL HYPE MAXIMALE* 🚨\n\n"
         message += f"🔥 *Tendance US :* {trend}\n\n"
         message += f"💡 *Tokens à sniper :*\n"
