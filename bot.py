@@ -8,7 +8,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# Endpoint de Groq (compatible OpenAI)
+# Endpoint de Groq
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 def get_real_trends():
@@ -25,7 +25,7 @@ def get_real_trends():
     return trends_list[:10]
 
 def analyze_trend_with_ai(trend_title):
-    """Demande à Llama 3 (via Groq) de noter le potentiel memecoin."""
+    """Demande à GPT-OSS 20B (via Groq) de noter le potentiel memecoin."""
     
     prompt = f"""Tu es un expert en memecoins qui chasse le buzz sur Twitter.
 Voici une tendance de recherche actuelle aux USA : "{trend_title}"
@@ -43,7 +43,7 @@ Format JSON strict : {{"tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, ...]}}
     }
     
     payload = {
-        "model": "llama-3.1-8b-instant", # Modèle ultra-rapide et gratuit
+        "model": "openai/gpt-oss-20b", # Modèle gratuit et ultra-rapide
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7,
         "response_format": {"type": "json_object"}
