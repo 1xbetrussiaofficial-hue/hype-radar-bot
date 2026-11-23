@@ -5,10 +5,12 @@ import json
 import time
 from google import genai
 
+# Configuration Telegram
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
+# Configuration Gemini
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 def get_news():
@@ -47,7 +49,7 @@ def get_news():
         if not any(bad_word in title_lower for bad_word in bad_keywords):
             clean_articles.append(art)
             
-    # LA CLÉ DE LA VITESSE : On ne garde que les 5 premières news max
+    # On ne garde que les 5 premières news max pour la vitesse
     return clean_articles[:5]
 
 def analyze_and_generate(title):
@@ -57,9 +59,9 @@ Si c'est People, Sport US, Tech ou absurde, génère 3 memecoins en JSON strict 
 {{"tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, {{"name": "Nom", "ticker": "$TICKER"}}, {{"name": "Nom", "ticker": "$TICKER"}}]}}
 """
     try:
-        # Utilisation de gemini-1.5-flash (le plus rapide)
+        # Utilisation de gemini-2.0-flash (le modèle stable actuel)
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 response_mime_type="application/json",
