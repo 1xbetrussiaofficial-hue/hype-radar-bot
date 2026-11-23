@@ -40,16 +40,20 @@ def get_news():
         except Exception as e:
             print(f"Erreur RSS {url} : {e}")
 
-    # PRÉ-FILTRE "BÉTON"
+    # PRÉ-FILTRE "BÉTON" : On rejette les news de trading/finance inutiles avant l'IA
     bad_keywords = ["price", "analysis", "forecast", "trading", "technical", "chart", "ether", "bitcoin", "xrp", "solana"]
     clean_articles = []
+    
     for art in articles:
         title_lower = art["title"].lower()
         if not any(bad_word in title_lower for bad_word in bad_keywords):
             clean_articles.append(art)
+            
     return clean_articles
 
 def analyze_and_generate(title):
+    """Utilise Gemini 3.8 Flash pour une analyse parfaite."""
+    
     prompt = f"""Tu es un trader de memecoins de génie sur Twitter. 
 Analyse ce titre de news US : "{title}"
 
@@ -61,9 +65,10 @@ Si c'est NUL, renvoie un JSON vide : {{"tokens": []}}
 Si c'est EXCELLENT, génère 3 memecoins. Format JSON strict :
 {{"tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, {{"name": "Nom", "ticker": "$TICKER"}}, {{"name": "Nom", "ticker": "$TICKER"}}]}}
 """
+    
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.8-flash", # Le modèle mis à jour
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -88,6 +93,7 @@ Si c'est EXCELLENT, génère 3 memecoins. Format JSON strict :
         )
         result = json.loads(response.text)
         return result.get("tokens", [])
+        
     except Exception as e:
         print(f"Erreur IA : {e}")
         return []
@@ -107,15 +113,19 @@ def main():
     for article in articles:
         title = article["title"]
         link = article["link"]
+
         tokens = analyze_and_generate(title)
         
+        # Si l'IA a jugé que c'était nul, elle renvoie une liste vide, on passe.
         if not tokens:
             continue
 
+        # Si on a des tokens, on envoie le message
         message = f"🚨 *SIGNAL HYPE DÉTECTÉ* 🚨\n\n"
         message += f"*{title}*\n"
         message += f"[Lien de la news]({link})\n\n"
         message += f"💡 *Tokens à sniper :*\n"
+        
         for t in tokens:
             message += f"• *{t['name']}* (`{t['ticker']}`)\n"
 
