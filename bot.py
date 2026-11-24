@@ -1,71 +1,48 @@
 import os
 import requests
-import json
-from trendspyg import download_google_trends_rss
+import freeaipi
 
-# --- Configuration ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-
-def get_real_trends():
-    print("📡 Récupération des tendances Google US...")
-    trends_list = []
+def get_news():
+    """Récupère les news crypto (ton API d'origine)."""
+    url = "https://cryptocurrency.cv/api/news?limit=5"
     try:
-        trends = download_google_trends_rss(geo='US')
-        trends_list = [trend['trend'] for trend in trends]
-        print(f"✅ {len(trends_list)} tendances trouvées.")
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("articles", [])
     except Exception as e:
-        print(f"❌ Erreur Google Trends : {e}")
-    
-    return trends_list[:15] # On regarde 15 tendances pour trouver les 2 meilleures
+        print(f"Erreur récupération news : {e}")
+        return []
 
-def analyze_trend_with_ai(trend_title):
-    # Le prompt "Sniper" V2 : On cherche le drame et l'absurde, pas le sport normal
-    prompt = f"""Tu es un trader de memecoins expert sur Crypto Twitter. Tu cherches le BUZZ ABSOLU.
-Voici une tendance de recherche : "{trend_title}"
+def analyze_and_filter(title):
+    """L'IA filtre la news. Si c'est nul, elle renvoie None."""
+    prompt = f"""Tu es un trader de memecoins expert sur Crypto Twitter.
+Analyse ce titre d'actualité : "{title}"
 
-Ta mission : Filtrer cette tendance de manière EXTRÊMEMENT STRICTE.
-- C'est un OUI (Score 9 ou 10) UNIQUEMENT si c'est : un clash entre célébrités, une déclaration folle d'Elon Musk ou Trump, un fait divers absurde, un scandale people, ou une tragédie qui fait tellement parler qu'elle en devient virale.
-- C'est un NON (Score 1) si c'est : un match de sport normal (ex: NBA, NFL de saison régulière), une blessure de sportif, une news de journaliste inconnu, de la finance, ou de la politique lourde.
+RÈGLES STRICTES :
+1. Si c'est de la finance ennuyeuse, de l'analyse de trading (ex: Bitcoin price, XRP analysis), ou de la politique lourde : Réponds UNIQUEMENT par le mot : IGNORE
+2. Si c'est un vrai buzz (People, Célébrité, Clash, Tech comme Elon Musk, Fait divers absurde) : Génère 3 concepts de memecoins.
 
-Si OUI, génère 3 memecoins (Nom + Ticker). 
-Format JSON STRICT :
-Si OUI : {{"score": 9, "tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, ...]}}
-Si NON : {{"score": 1, "tokens": []}}
+Format si c'est un buzz (sans explication) :
+Nom du Token ($TICKER)
+Nom du Token ($TICKER)
+Nom du Token ($TICKER)
 """
-    
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    payload = {
-        "model": "openai/gpt-oss-120b", 
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.5, # Très analytique, pas de fantaisie inutile
-        "response_format": {"type": "json_object"}
-    }
-    
     try:
-        response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=30)
+        response = freeaipi.chat(prompt)
+        text_response = response.content if hasattr(response, 'content') else str(response)
         
-        if response.status_code != 200:
+        if "IGNORE" in text_response:
+            print(f"❌ News ignorée : {title}")
             return None
             
-        data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        result = json.loads(content)
-        
-        # On ne garde que si le score est de 9 ou 10
-        if result.get("score", 0) >= 9:
-            return result.get("tokens", [])
-        return None
-        
+        # On récupère les noms générés
+        return [name.strip() for name in text_response.split("\n") if name.strip() and "$" in name][:3]
     except Exception as e:
-        print(f"❌ Erreur IA : {e}")
+        print(f"Erreur génération IA : {e}")
         return None
 
 def send_to_telegram(message):
@@ -73,40 +50,38 @@ def send_to_telegram(message):
     payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
     try:
         requests.post(url, json=payload, timeout=10)
+        print("✅ Message envoyé avec succès !")
     except Exception as e:
-        print(f"❌ Erreur Telegram : {e}")
+        print(f"Erreur envoi Telegram : {e}")
 
 def main():
-    trends = get_real_trends()
-    if not trends:
+    articles = get_news()
+    if not articles:
+        print("Aucune news récupérée.")
         return
 
-    print(f"🔎 Scan de {len(trends)} tendances pour trouver le vrai buzz...")
-    
-    signals_envoyes = 0
-    MAX_SIGNAUX = 2
+    print(f"🔎 Analyse de {len(articles)} news...")
 
-    for trend in trends:
-        if signals_envoyes >= MAX_SIGNAUX:
-            print("✋ Limite de 2 signaux atteinte. Fin du scan.")
-            break
-
-        print(f"🧐 Analyse : {trend}")
-        tokens = analyze_trend_with_ai(trend)
+    for article in articles:
+        title = article.get("title", "Titre inconnu")
+        link = article.get("link", "")
         
-        if not tokens:
-            print("   ⏭️ Ignoré (pas assez fort).")
+        # L'IA filtre ici
+        names = analyze_and_filter(title)
+        
+        # Si l'IA a dit "IGNORE", on passe à la suite sans rien envoyer
+        if not names:
             continue
 
-        message = f"🚨 *SIGNAL HYPE MAXIMALE* 🚨\n\n"
-        message += f"🔥 *Tendance US :* {trend}\n\n"
-        message += f"💡 *Tokens à sniper :*\n"
-        for t in tokens:
-            message += f"• *{t['name']}* (`{t['ticker']}`)\n"
+        # Si c'est validé, on envoie le message
+        message = f"🚨 *SIGNAL HYPE* 🚨\n\n"
+        message += f"*{title}*\n"
+        message += f"[Lire l'article]({link})\n\n"
+        message += f"💡 *Tokens suggérés :*\n"
+        for name in names:
+            message += f"• `{name}`\n"
 
         send_to_telegram(message)
-        signals_envoyes += 1
-        print(f"   ✅ Signal envoyé !")
 
 if __name__ == "__main__":
     main()
