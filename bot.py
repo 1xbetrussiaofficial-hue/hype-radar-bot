@@ -3,6 +3,7 @@ import requests
 import feedparser
 import json
 import urllib.parse
+import time
 
 # --- Configuration ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -15,15 +16,14 @@ def get_news():
     """Récupère les news les plus virales via des flux RSS ciblés."""
     articles = []
     rss_urls = [
-        "https://tmz.com/rss.xml", # People / Scandales / Buzz US
-        "https://nypost.com/entertainment/feed/", # Divertissement US
-        "http://www.espn.com/espn/rss/news" # Sport US
+        "https://tmz.com/rss.xml", 
+        "https://nypost.com/entertainment/feed/", 
+        "http://www.espn.com/espn/rss/news" 
     ]
     
     for url in rss_urls:
         try:
             feed = feedparser.parse(url)
-            # On prend les 5 dernières news de chaque flux
             for entry in feed.entries[:5]:
                 articles.append({"title": entry.title, "link": entry.link})
         except Exception as e:
@@ -37,7 +37,7 @@ def analyze_and_generate(title):
 
 RÈGLES STRICTES :
 1. Si la news est ennuyeuse (finance, trading, politique lourde, match de sport de saison régulière), réponds UNIQUEMENT : {{"score": 1, "tokens": []}}
-2. Si la news est un vrai buzz (people, clash, célébrité, tech, fait divers absurde), note son potentiel sur 10 et génère 3 noms de tokens en lien DIRECT avec la news (les noms doivent utiliser les mots-clés de l'actu).
+2. Si la news est un vrai buzz (people, clash, célébrité, tech, fait divers absurde), note son potentiel sur 10 et génère 3 noms de tokens en lien DIRECT avec la news.
 
 Format JSON STRICT :
 Si buzz : {{"score": 9, "tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, ...]}}
@@ -66,7 +66,6 @@ Si ennuyeux : {{"score": 1, "tokens": []}}
         content = data["choices"][0]["message"]["content"]
         result = json.loads(content)
         
-        # On ne garde que si le score est élevé (8, 9 ou 10)
         if result.get("score", 0) >= 8:
             return result.get("tokens", [])
         return None
@@ -75,14 +74,16 @@ Si ennuyeux : {{"score": 1, "tokens": []}}
         return None
 
 def generate_meme_image(prompt):
-    """Génère une image de meme via Pollinations.ai (gratuit, sans clé)."""
+    """Génère une image via l'endpoint public de Pollinations (gratuit)."""
     encoded_prompt = urllib.parse.quote(prompt)
-    # Format carré 1:1 (1024x1024) pour Pump.fun
-    image_url = f"https://gen.pollinations.ai/image/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
+    # Utilisation de l'URL publique qui fonctionne sans clé
+    image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
     
     print(f"🎨 Génération de l'image pour : {prompt}")
     try:
-        response = requests.get(image_url, timeout=60)
+        # User-Agent pour éviter d'être bloqué par le serveur
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        response = requests.get(image_url, headers=headers, timeout=60)
         response.raise_for_status()
         return response.content 
     except Exception as e:
@@ -93,7 +94,6 @@ def send_photo_to_telegram(photo_bytes, caption):
     """Envoie l'image et le texte sur Telegram."""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     
-    # On utilise requests avec 'files' pour gérer le multipart/form-data facilement
     files = {'photo': ('meme.jpg', photo_bytes, 'image/jpeg')}
     data = {'chat_id': CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}
     
@@ -138,8 +138,9 @@ def main():
         
         if image_bytes:
             send_photo_to_telegram(image_bytes, caption)
+            # Pause de 15 secondes obligatoire pour respecter la limite de l'API gratuite
+            time.sleep(15)
         else:
-            # Fallback : envoi du texte seul si l'image échoue
             print("Envoi du texte seul (image échouée).")
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
             requests.post(url, json={"chat_id": CHAT_ID, "text": caption, "parse_mode": "Markdown"})
