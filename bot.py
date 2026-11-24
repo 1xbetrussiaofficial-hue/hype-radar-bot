@@ -1,6 +1,5 @@
 import os
 import requests
-import feedparser
 import json
 import sys
 import re
@@ -16,11 +15,10 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 def get_og_image(url):
-    """Extrait l'image originale de l'article (Règle 3)."""
+    """Extrait l'image originale de l'article."""
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         res = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
-        # Regex pour trouver l'image principale de l'article
         match = re.search(r'<meta[^>]*property=["\']og:image["\'][^>]*content=["\'](.*?)["\']', res.text)
         if match:
             return match.group(1)
@@ -29,63 +27,59 @@ def get_og_image(url):
     return None
 
 def get_news():
-    """Récupère les news Crypto, Tech, Business et US (Règle 1)."""
+    """Récupère UNIQUEMENT des news Crypto via l'API dédiée."""
     articles = []
-    rss_urls = [
-        "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en",
-        "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-US&gl=US&ceid=US:en",
-        "https://www.coindesk.com/arc/outboundfeeds/rss/" # Source Crypto pure
-    ]
-    
-    # BLACKLIST STRICTE (Règle 1)
-    banned_words = [
-        "taylor swift", "kardashian", "britney", "spears", "movie", "cinema", 
-        "album", "music", "reality tv", "concert", "actor", "actress", "hollywood",
-        "celebrity", "entertainment"
-    ]
-    
-    for url in rss_urls:
-        try:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:10]: # On regarde 10 news par flux
-                title = entry.title
+    try:
+        # L'API crypto fiable
+        url = "https://cryptocurrency.cv/api/news?limit=15"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            for art in data.get("articles", []):
+                title = art.get("title", "")
                 
-                # Si un mot interdit est dans le titre, on passe
-                if any(word in title.lower() for word in banned_words):
+                # Mots-clés OBLIGATOIRES pour que ce soit du memecoin (Hack, SEC, Elon, etc.)
+                # Si la news ne contient pas au moins un de ces mots, on la jette.
+                must_have = ["hack", "scam", "sec", "elon", "musk", "trump", "lawsuit", "ban", "solana", "rug", "crash", "surge", "etf", "binance", "coinbase", "exploit", "whale"]
+                
+                if not any(word in title.lower() for word in must_have):
+                    continue # On ignore les news tech basiques
+                    
+                # On ignore les prix/analyses classiques
+                if any(word in title.lower() for word in ["price prediction", "technical analysis", "how to buy"]):
                     continue
-                
-                # On cherche l'image dans le flux RSS
-                image_url = None
-                if hasattr(entry, 'media_content') and len(entry.media_content) > 0:
-                    image_url = entry.media_content[0].get('url')
-                elif hasattr(entry, 'enclosures') and len(entry.enclosures) > 0:
-                    if 'image' in entry.enclosures[0].get('type', ''):
-                        image_url = entry.enclosures[0].get('href')
-                            
-                articles.append({"title": title, "link": entry.link, "image_url": image_url})
-        except Exception as e:
-            print(f"Erreur lecture RSS {url} : {e}")
-            
+
+                articles.append({
+                    "title": title, 
+                    "link": art.get("link"), 
+                    "image_url": None # On la cherchera après
+                })
+    except Exception as e:
+        print(f"Erreur API Crypto : {e}")
+        
     return articles
 
 def analyze_news(title):
-    """L'IA filtre et génère le nom/ticker (Règles 1 et 2)."""
-    prompt = f"""Tu es un expert en memecoins sur Solana. Analyse ce titre : "{title}"
+    """L'IA génère le nom de memecoin degen."""
+    prompt = f"""Tu es un trader de memecoins "degen" sur Solana.
+Analyse ce titre : "{title}"
 
-RÈGLE 1 : Si c'est du people, de la musique ou du cinéma, réponds : {{"is_good": false}}
-RÈGLE 2 : Si c'est Crypto, Tech, Politique US, ou Scandale financier, c'est OUI. Explique en 1 phrase courte "pourquoi ça marche" (ex: "Panique boursière", "Trump", "Hack").
-RÈGLE 3 : Génère 1 seul nom de token (max 3 mots) très accrocheur, et 1 Ticker (4 à 5 lettres max avec un $). Exemple : {{"name": "Save Jensen", "ticker": "$SAVE"}}
+RÈGLE 1 (FILTRE) : Si la news n'est pas liée à la crypto (finance, hack, politique US, tech), réponds : {{"is_good": false}}
+RÈGLE 2 (BUZZ) : Si c'est un Hack, une Faillite, un Scandale, une déclaration d'Elon Musk ou de Trump, ou une action de la SEC : c'est OUI. Explique "pourquoi ça marche" en 1 phrase courte (ex: "Hack de protocole", "Elon drama", "SEC attaque").
+RÈGLE 3 (NOM) : Génère un nom de memecoin ULTRA DEGEN (max 3 mots) et un Ticker (4-5 lettres). Utilise le vocabulaire Crypto (Rekt, Fud, Dump, Moon, Inu, Chad).
+Exemple : Si "Binance hacked" -> Nom: "BinanceRekt" | Ticker: "$REKT"
 
 Format JSON STRICT :
-Si c'est mauvais : {{"is_good": false}}
-Si c'est bon : {{"is_good": true, "why": "Explication", "name": "Nom", "ticker": "$TICK"}}
+Si mauvais : {{"is_good": false}}
+Si bon : {{"is_good": true, "why": "Explication", "name": "Nom", "ticker": "$TICK"}}
 """
     
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": "openai/gpt-oss-120b",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.4,
+        "temperature": 0.6,
         "response_format": {"type": "json_object"}
     }
     
@@ -101,13 +95,10 @@ Si c'est bon : {{"is_good": true, "why": "Explication", "name": "Nom", "ticker":
             return result
         return None
     except Exception as e:
-        print(f"Erreur IA : {e}")
         return None
 
-def send_to_telegram(title, link, image_url, ai_data):
-    """Envoie le message formaté (Règle 4)."""
-    
-    # Formatage exact demandé
+def send_to_telegram(title, link, ai_data):
+    """Formatage parfait avec image."""
     caption = f"🚨 *ALERTE MEMECOIN* 🚨\n"
     caption += f"*La News :* {title}\n"
     caption += f"*Pourquoi ça marche :* {ai_data['why']}\n\n"
@@ -116,9 +107,8 @@ def send_to_telegram(title, link, image_url, ai_data):
     caption += f"*Ticker :* {ai_data['ticker']}\n\n"
     caption += f"🔗 [Lien de l'article]({link})"
     
-    # Si l'image n'est pas dans le flux, on va la chercher (Règle 3)
-    if not image_url:
-        image_url = get_og_image(link)
+    # On va chercher l'image de l'article
+    image_url = get_og_image(link)
 
     if image_url:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
@@ -137,30 +127,30 @@ def send_to_telegram(title, link, image_url, ai_data):
     try:
         requests.post(url, json=payload, timeout=15)
         print("✅ Alerte envoyée (texte seul).")
-    except Exception as e:
-        print(f"Erreur envoi texte : {e}")
+    except Exception:
+        pass
 
 def main():
     articles = get_news()
-    if not articles: return
+    if not articles: 
+        print("Aucune news crypto pertinente trouvée pour le moment.")
+        return
 
-    print(f"🔎 Analyse de {len(articles)} news...")
+    print(f"🔎 Analyse de {len(articles)} news crypto...")
     alertes_envoyees = 0
 
     for article in articles:
-        if alertes_envoyees >= 5: # Max 5 alertes par run
+        if alertes_envoyees >= 5: # Max 5 alertes
             break
 
         title = article["title"]
-        
-        # L'IA filtre et génère
         ai_data = analyze_news(title)
         
         if ai_data:
-            send_to_telegram(title, article["link"], article["image_url"], ai_data)
+            send_to_telegram(title, article["link"], ai_data)
             alertes_envoyees += 1
         else:
-            print(f"❌ Ignoré (pas de potentiel memecoin) : {title}")
+            print(f"❌ Ignoré : {title}")
 
 if __name__ == "__main__":
     main()
