@@ -3,6 +3,11 @@ import requests
 import feedparser
 import json
 import urllib.parse
+import time
+import sys
+
+# Force l'affichage des logs en temps réel sur GitHub Actions
+sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
 
 # --- Configuration ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -75,9 +80,7 @@ Si ennuyeux : {{"score": 1, "tokens": []}}
 def generate_meme_image(trend_title, token_name):
     """Génère une image de mème via memegen.link (gratuit, sans clé, sans limite)."""
     try:
-        # On utilise le template "drake" pour un rendu classique et drôle
         template = "drake"
-        # Nettoyage des textes pour qu'ils soient valides dans l'URL
         top_text = urllib.parse.quote("Ignorer le buzz")
         bottom_text = urllib.parse.quote(f"Lancer {token_name} sur '{trend_title[:30]}...'")
         
@@ -120,13 +123,13 @@ def main():
         title = article["title"]
         link = article["link"]
         
+        print(f"🧐 Analyse : {title}")
         tokens = analyze_and_generate(title)
         
         if not tokens:
             print(f"❌ News ignorée : {title}")
             continue
 
-        # Construction du message texte
         caption = f"🚨 *SIGNAL HYPE* 🚨\n\n"
         caption += f"*{title}*\n"
         caption += f"[Lire l'article]({link})\n\n"
@@ -134,7 +137,6 @@ def main():
         for t in tokens:
             caption += f"• *{t['name']}* (`{t['ticker']}`)\n"
         
-        # On utilise le premier token pour le mème
         first_token_name = tokens[0]['name']
         image_bytes = generate_meme_image(title, first_token_name)
         
@@ -144,6 +146,9 @@ def main():
             print("Envoi du texte seul (image échouée).")
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
             requests.post(url, json={"chat_id": CHAT_ID, "text": caption, "parse_mode": "Markdown"})
+            
+        # Petite pause pour laisser respirer les APIs
+        time.sleep(2)
 
 if __name__ == "__main__":
     main()
