@@ -1,10 +1,10 @@
 import os
 import requests
+import feedparser
 import json
 import urllib.parse
-import urllib.request
-from io import BytesIO
 
+# --- Configuration ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
@@ -15,21 +15,17 @@ def get_news():
     """Récupère les news les plus virales via des flux RSS ciblés."""
     articles = []
     rss_urls = [
-        "https://tmz.com/rss.xml", # People / Scandales
-        "https://nypost.com/entertainment/feed/", # Divertissement
-        "http://www.espn.com/espn/rss/news" # Sport US (filtré ensuite)
+        "https://tmz.com/rss.xml", # People / Scandales / Buzz US
+        "https://nypost.com/entertainment/feed/", # Divertissement US
+        "http://www.espn.com/espn/rss/news" # Sport US
     ]
     
     for url in rss_urls:
         try:
-            response = requests.get(url, timeout=10)
-            # On parse le flux RSS manuellement (simple et sans dépendance)
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(response.content)
-            for item in root.findall('.//item')[:5]: # 5 par flux
-                title = item.find('title').text
-                link = item.find('link').text
-                articles.append({"title": title, "link": link})
+            feed = feedparser.parse(url)
+            # On prend les 5 dernières news de chaque flux
+            for entry in feed.entries[:5]:
+                articles.append({"title": entry.title, "link": entry.link})
         except Exception as e:
             print(f"Erreur lecture RSS {url} : {e}")
             
@@ -40,8 +36,8 @@ def analyze_and_generate(title):
     prompt = f"""Tu es un trader de memecoins expert. Analyse cette news US : "{title}"
 
 RÈGLES STRICTES :
-1. Si la news est ennuyeuse (finance, trading, match de sport de saison régulière, politique lourde), réponds UNIQUEMENT : {{"score": 1, "tokens": []}}
-2. Si la news est un vrai buzz (people, clash, célébrité, tech, fait divers absurde), note son potentiel sur 10 et génère 3 noms de tokens en lien DIRECT avec la news.
+1. Si la news est ennuyeuse (finance, trading, politique lourde, match de sport de saison régulière), réponds UNIQUEMENT : {{"score": 1, "tokens": []}}
+2. Si la news est un vrai buzz (people, clash, célébrité, tech, fait divers absurde), note son potentiel sur 10 et génère 3 noms de tokens en lien DIRECT avec la news (les noms doivent utiliser les mots-clés de l'actu).
 
 Format JSON STRICT :
 Si buzz : {{"score": 9, "tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, ...]}}
@@ -53,7 +49,7 @@ Si ennuyeux : {{"score": 1, "tokens": []}}
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "openai/gpt-oss-120b", # Modèle puissant pour la pertinence
+        "model": "openai/gpt-oss-120b",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.6,
         "response_format": {"type": "json_object"}
@@ -61,15 +57,16 @@ Si ennuyeux : {{"score": 1, "tokens": []}}
     
     try:
         response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=30)
+        
         if response.status_code != 200:
-            print(f"Erreur API Groq : {response.text}")
+            print(f"❌ Erreur API Groq : {response.text}")
             return None
             
         data = response.json()
         content = data["choices"][0]["message"]["content"]
         result = json.loads(content)
         
-        # On ne garde que si le score est élevé
+        # On ne garde que si le score est élevé (8, 9 ou 10)
         if result.get("score", 0) >= 8:
             return result.get("tokens", [])
         return None
@@ -80,45 +77,34 @@ Si ennuyeux : {{"score": 1, "tokens": []}}
 def generate_meme_image(prompt):
     """Génère une image de meme via Pollinations.ai (gratuit, sans clé)."""
     encoded_prompt = urllib.parse.quote(prompt)
-    # Format carré 1:1 pour Pump.fun
-    image_url = f"https://gen.pollinations.ai/image/{encoded_prompt}?width=1024&height=1024&model=flux"
+    # Format carré 1:1 (1024x1024) pour Pump.fun
+    image_url = f"https://gen.pollinations.ai/image/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
     
-    print(f"🎨 Génération de l'image : {image_url}")
+    print(f"🎨 Génération de l'image pour : {prompt}")
     try:
         response = requests.get(image_url, timeout=60)
         response.raise_for_status()
-        return response.content # Renvoie les bytes de l'image
+        return response.content 
     except Exception as e:
         print(f"Erreur génération image : {e}")
         return None
 
 def send_photo_to_telegram(photo_bytes, caption):
-    """Envoie une image via l'API sendPhoto de Telegram (multipart/form-data)."""
+    """Envoie l'image et le texte sur Telegram."""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     
-    # Construction du corps multipart/form-data manuellement
-    boundary = "----HypeRadarBoundary"
-    body = b""
-    body += f"--{boundary}\r\n".encode()
-    body += f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{CHAT_ID}\r\n'.encode()
-    body += f"--{boundary}\r\n".encode()
-    body += f'Content-Disposition: form-data; name="caption"\r\n\r\n{caption}\r\n'.encode()
-    body += f"--{boundary}\r\n".encode()
-    body += f'Content-Disposition: form-data; name="photo"; filename="meme.jpg"\r\n'.encode()
-    body += b'Content-Type: image/jpeg\r\n\r\n'
-    body += photo_bytes
-    body += f"\r\n--{boundary}--\r\n".encode()
-    
-    headers = {
-        "Content-Type": f"multipart/form-data; boundary={boundary}"
-    }
+    # On utilise requests avec 'files' pour gérer le multipart/form-data facilement
+    files = {'photo': ('meme.jpg', photo_bytes, 'image/jpeg')}
+    data = {'chat_id': CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}
     
     try:
-        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-        urllib.request.urlopen(req, timeout=30)
-        print("✅ Image envoyée avec succès !")
+        response = requests.post(url, files=files, data=data, timeout=30)
+        if response.status_code == 200:
+            print("✅ Image et message envoyés avec succès !")
+        else:
+            print(f"Erreur envoi Telegram : {response.text}")
     except Exception as e:
-        print(f"Erreur envoi photo Telegram : {e}")
+        print(f"Erreur envoi photo : {e}")
 
 def main():
     articles = get_news()
@@ -146,8 +132,8 @@ def main():
         for t in tokens:
             caption += f"• *{t['name']}* (`{t['ticker']}`)\n"
         
-        # Génération du prompt pour l'image (basé sur le premier token)
-        image_prompt = f"A funny meme coin illustration about {title}, featuring {tokens[0]['name']}, crypto style, 1:1 square"
+        # Génération du prompt pour l'image
+        image_prompt = f"A funny crypto meme coin illustration about {title}, featuring {tokens[0]['name']}, vibrant colors, internet culture style"
         image_bytes = generate_meme_image(image_prompt)
         
         if image_bytes:
