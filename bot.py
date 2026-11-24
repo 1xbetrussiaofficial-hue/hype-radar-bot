@@ -15,29 +15,36 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 def get_news():
-    """Récupère les news et extrait l'image originale de l'article."""
+    """Récupère les news les plus virales et extrait l'image originale."""
     articles = []
+    
+    # On utilise Google News (Top Stories & Entertainment) qui ratisse beaucoup plus large
     rss_urls = [
-        "https://tmz.com/rss.xml",
-        "https://nypost.com/entertainment/feed/",
-        "http://www.espn.com/espn/rss/news"
+        "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-US&gl=US&ceid=US:en",
+        "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en",
+        "https://tmz.com/rss.xml"
     ]
+    
+    # Mots-clés à ignorer (pour ne pas perdre de temps avec les promos)
+    bad_keywords = ["black friday", "deal", "sale", "discount", "price", "stock", "market"]
     
     for url in rss_urls:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:5]:
+            for entry in feed.entries[:8]: # On prend 8 news par flux pour avoir du choix
+                title = entry.title
+                
+                # PRÉ-FILTRE : On ignore les promos et la finance avant même l'IA
+                if any(keyword in title.lower() for keyword in bad_keywords):
+                    continue
+                
                 # Extraction de l'image depuis le flux RSS
                 image_url = None
-                
-                # Méthode 1 : media_content (très courant)
                 if hasattr(entry, 'media_content') and len(entry.media_content) > 0:
                     image_url = entry.media_content[0].get('url')
-                # Méthode 2 : enclosures
                 elif hasattr(entry, 'enclosures') and len(entry.enclosures) > 0:
                     if 'image' in entry.enclosures[0].get('type', ''):
                         image_url = entry.enclosures[0].get('href')
-                # Méthode 3 : links
                 elif hasattr(entry, 'links'):
                     for link in entry.links:
                         if 'image' in link.get('type', ''):
@@ -45,7 +52,7 @@ def get_news():
                             break
                             
                 articles.append({
-                    "title": entry.title, 
+                    "title": title, 
                     "link": entry.link,
                     "image_url": image_url
                 })
@@ -55,13 +62,13 @@ def get_news():
     return articles
 
 def is_viral_news(title):
-    """L'IA dit juste OUI (score 9) si c'est viral, ou NON (score 1)."""
+    """L'IA dit OUI (score 9) si c'est viral, ou NON (score 1)."""
     prompt = f"""Tu es un expert en tendances sur Crypto Twitter.
 Analyse ce titre de news US : "{title}"
 
-Est-ce que c'est un sujet viral, un clash, un scandale people, ou un fait divers absurde qui peut faire le buzz ?
+Est-ce que c'est un sujet viral, un clash, un scandale people, une déclaration folle, ou un fait divers absurde qui peut faire le buzz ?
 - Si OUI (C'est du buzz), réponds UNIQUEMENT : {{"score": 9}}
-- Si NON (C'est ennuyeux, finance, ou match de sport normal), réponds UNIQUEMENT : {{"score": 1}}
+- Si NON (C'est ennuyeux, de la politique lourde, ou du sport de bas niveau), réponds UNIQUEMENT : {{"score": 1}}
 """
     
     headers = {
@@ -82,21 +89,18 @@ Est-ce que c'est un sujet viral, un clash, un scandale people, ou un fait divers
             
         data = response.json()
         result = json.loads(data["choices"][0]["message"]["content"])
-        
-        # On garde si le score est de 9 (donc viral)
         return result.get("score", 0) >= 8
     except Exception as e:
         print(f"Erreur IA : {e}")
         return False
 
 def send_to_telegram(title, link, image_url):
-    """Envoie la news avec l'image originale (ou juste le texte si pas d'image)."""
+    """Envoie la news avec l'image originale."""
     caption = f"🚨 *BUZZ VIRAL DÉTECTÉ* 🚨\n\n"
     caption += f"*{title}*\n\n"
     caption += f"[Lire l'article]({link})"
     
     if image_url:
-        # Envoi de l'image par URL (Telegram la télécharge directement)
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
         payload = {
             "chat_id": CHAT_ID, 
@@ -108,22 +112,18 @@ def send_to_telegram(title, link, image_url):
             res = requests.post(url, json=payload, timeout=15)
             if res.status_code == 200:
                 print("✅ News avec image envoyée !")
-            else:
-                # Si l'image est bloquée par Telegram, on envoie que le texte
-                print(f"Image refusée par Telegram ({res.status_code}), envoi du texte...")
-                image_url = None 
+                return
         except Exception:
-            image_url = None
+            pass # Si l'image échoue, on passe au texte
 
-    if not image_url:
-        # Envoi du texte seul (si pas d'image dans l'article ou si l'image a échoué)
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {"chat_id": CHAT_ID, "text": caption, "parse_mode": "Markdown"}
-        try:
-            requests.post(url, json=payload, timeout=15)
-            print("✅ News texte envoyée !")
-        except Exception as e:
-            print(f"Erreur envoi texte : {e}")
+    # Envoi du texte seul
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": caption, "parse_mode": "Markdown"}
+    try:
+        requests.post(url, json=payload, timeout=15)
+        print("✅ News texte envoyée !")
+    except Exception as e:
+        print(f"Erreur envoi texte : {e}")
 
 def main():
     articles = get_news()
@@ -131,10 +131,10 @@ def main():
         print("Aucune news récupérée.")
         return
 
-    print(f"🔎 Analyse de {len(articles)} news...")
+    print(f"🔎 Analyse de {len(articles)} news filtrées...")
     
     signaux_envoyes = 0
-    MAX_SIGNAUX = 3 # On s'arrête après 3 vrais buzz pour ne pas spammer
+    MAX_SIGNAUX = 3 # On s'arrête après 3 vrais buzz
 
     for article in articles:
         if signaux_envoyes >= MAX_SIGNAUX:
