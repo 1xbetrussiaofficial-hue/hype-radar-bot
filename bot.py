@@ -3,7 +3,6 @@ import requests
 import feedparser
 import json
 import urllib.parse
-import time
 
 # --- Configuration ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -73,26 +72,31 @@ Si ennuyeux : {{"score": 1, "tokens": []}}
         print(f"Erreur IA : {e}")
         return None
 
-def generate_meme_image(prompt):
-    """Génère une image via l'endpoint public de Pollinations (gratuit, 1 req/45s)."""
-    encoded_prompt = urllib.parse.quote(prompt)
-    image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
-    
-    print(f"🎨 Génération de l'image pour : {prompt}")
+def generate_meme_image(trend_title, token_name):
+    """Génère une image de mème via memegen.link (gratuit, sans clé, sans limite)."""
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        response = requests.get(image_url, headers=headers, timeout=60)
+        # On utilise le template "drake" pour un rendu classique et drôle
+        template = "drake"
+        # Nettoyage des textes pour qu'ils soient valides dans l'URL
+        top_text = urllib.parse.quote("Ignorer le buzz")
+        bottom_text = urllib.parse.quote(f"Lancer {token_name} sur '{trend_title[:30]}...'")
+        
+        image_url = f"https://api.memegen.link/images/{template}/{top_text}/{bottom_text}.png"
+        
+        print(f"🎨 Génération du mème : {image_url}")
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(image_url, headers=headers, timeout=30)
         response.raise_for_status()
         return response.content
     except Exception as e:
-        print(f"Erreur génération image : {e}")
+        print(f"Erreur génération mème : {e}")
         return None
 
 def send_photo_to_telegram(photo_bytes, caption):
     """Envoie l'image et le texte sur Telegram."""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     
-    files = {'photo': ('meme.jpg', photo_bytes, 'image/jpeg')}
+    files = {'photo': ('meme.png', photo_bytes, 'image/png')}
     data = {'chat_id': CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}
     
     try:
@@ -122,6 +126,7 @@ def main():
             print(f"❌ News ignorée : {title}")
             continue
 
+        # Construction du message texte
         caption = f"🚨 *SIGNAL HYPE* 🚨\n\n"
         caption += f"*{title}*\n"
         caption += f"[Lire l'article]({link})\n\n"
@@ -129,13 +134,12 @@ def main():
         for t in tokens:
             caption += f"• *{t['name']}* (`{t['ticker']}`)\n"
         
-        image_prompt = f"A funny crypto meme coin illustration about {title}, featuring {tokens[0]['name']}, vibrant colors, internet culture style"
-        image_bytes = generate_meme_image(image_prompt)
+        # On utilise le premier token pour le mème
+        first_token_name = tokens[0]['name']
+        image_bytes = generate_meme_image(title, first_token_name)
         
         if image_bytes:
             send_photo_to_telegram(image_bytes, caption)
-            # Pause obligatoire de 45 secondes pour respecter la limite de l'API
-            time.sleep(45)
         else:
             print("Envoi du texte seul (image échouée).")
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
