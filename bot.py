@@ -2,11 +2,9 @@ import os
 import requests
 import feedparser
 import json
-import urllib.parse
-import time
 import sys
 
-# Force l'affichage des logs en temps réel sur GitHub Actions
+# Force l'affichage des logs
 sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
 
 # --- Configuration ---
@@ -17,7 +15,7 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 def get_news():
-    """Récupère les news les plus virales via des flux RSS ciblés."""
+    """Récupère les news et extrait l'image originale de l'article."""
     articles = []
     rss_urls = [
         "https://tmz.com/rss.xml",
@@ -29,23 +27,41 @@ def get_news():
         try:
             feed = feedparser.parse(url)
             for entry in feed.entries[:5]:
-                articles.append({"title": entry.title, "link": entry.link})
+                # Extraction de l'image depuis le flux RSS
+                image_url = None
+                
+                # Méthode 1 : media_content (très courant)
+                if hasattr(entry, 'media_content') and len(entry.media_content) > 0:
+                    image_url = entry.media_content[0].get('url')
+                # Méthode 2 : enclosures
+                elif hasattr(entry, 'enclosures') and len(entry.enclosures) > 0:
+                    if 'image' in entry.enclosures[0].get('type', ''):
+                        image_url = entry.enclosures[0].get('href')
+                # Méthode 3 : links
+                elif hasattr(entry, 'links'):
+                    for link in entry.links:
+                        if 'image' in link.get('type', ''):
+                            image_url = link.get('href')
+                            break
+                            
+                articles.append({
+                    "title": entry.title, 
+                    "link": entry.link,
+                    "image_url": image_url
+                })
         except Exception as e:
             print(f"Erreur lecture RSS {url} : {e}")
             
     return articles
 
-def analyze_and_generate(title):
-    """Filtre la news et génère des noms de tokens pertinents avec Groq."""
-    prompt = f"""Tu es un trader de memecoins expert. Analyse cette news US : "{title}"
+def is_viral_news(title):
+    """L'IA dit juste OUI (score 9) si c'est viral, ou NON (score 1)."""
+    prompt = f"""Tu es un expert en tendances sur Crypto Twitter.
+Analyse ce titre de news US : "{title}"
 
-RÈGLES STRICTES :
-1. Si la news est ennuyeuse (finance, trading, politique lourde, match de sport de saison régulière), réponds UNIQUEMENT : {{"score": 1, "tokens": []}}
-2. Si la news est un vrai buzz (people, clash, célébrité, tech, fait divers absurde), note son potentiel sur 10 et génère 3 noms de tokens en lien DIRECT avec la news.
-
-Format JSON STRICT :
-Si buzz : {{"score": 9, "tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, ...]}}
-Si ennuyeux : {{"score": 1, "tokens": []}}
+Est-ce que c'est un sujet viral, un clash, un scandale people, ou un fait divers absurde qui peut faire le buzz ?
+- Si OUI (C'est du buzz), réponds UNIQUEMENT : {{"score": 9}}
+- Si NON (C'est ennuyeux, finance, ou match de sport normal), réponds UNIQUEMENT : {{"score": 1}}
 """
     
     headers = {
@@ -55,61 +71,59 @@ Si ennuyeux : {{"score": 1, "tokens": []}}
     payload = {
         "model": "openai/gpt-oss-120b",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.6,
+        "temperature": 0.5,
         "response_format": {"type": "json_object"}
     }
     
     try:
         response = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=30)
-        
         if response.status_code != 200:
-            print(f"❌ Erreur API Groq : {response.text}")
-            return None
+            return False
             
         data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        result = json.loads(content)
+        result = json.loads(data["choices"][0]["message"]["content"])
         
-        if result.get("score", 0) >= 8:
-            return result.get("tokens", [])
-        return None
+        # On garde si le score est de 9 (donc viral)
+        return result.get("score", 0) >= 8
     except Exception as e:
         print(f"Erreur IA : {e}")
-        return None
+        return False
 
-def generate_meme_image(trend_title, token_name):
-    """Génère une image de mème via memegen.link (gratuit, sans clé, sans limite)."""
-    try:
-        template = "drake"
-        top_text = urllib.parse.quote("Ignorer le buzz")
-        bottom_text = urllib.parse.quote(f"Lancer {token_name} sur '{trend_title[:30]}...'")
-        
-        image_url = f"https://api.memegen.link/images/{template}/{top_text}/{bottom_text}.png"
-        
-        print(f"🎨 Génération du mème : {image_url}")
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(image_url, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.content
-    except Exception as e:
-        print(f"Erreur génération mème : {e}")
-        return None
+def send_to_telegram(title, link, image_url):
+    """Envoie la news avec l'image originale (ou juste le texte si pas d'image)."""
+    caption = f"🚨 *BUZZ VIRAL DÉTECTÉ* 🚨\n\n"
+    caption += f"*{title}*\n\n"
+    caption += f"[Lire l'article]({link})"
+    
+    if image_url:
+        # Envoi de l'image par URL (Telegram la télécharge directement)
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+        payload = {
+            "chat_id": CHAT_ID, 
+            "photo": image_url, 
+            "caption": caption, 
+            "parse_mode": "Markdown"
+        }
+        try:
+            res = requests.post(url, json=payload, timeout=15)
+            if res.status_code == 200:
+                print("✅ News avec image envoyée !")
+            else:
+                # Si l'image est bloquée par Telegram, on envoie que le texte
+                print(f"Image refusée par Telegram ({res.status_code}), envoi du texte...")
+                image_url = None 
+        except Exception:
+            image_url = None
 
-def send_photo_to_telegram(photo_bytes, caption):
-    """Envoie l'image et le texte sur Telegram."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-    
-    files = {'photo': ('meme.png', photo_bytes, 'image/png')}
-    data = {'chat_id': CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}
-    
-    try:
-        response = requests.post(url, files=files, data=data, timeout=30)
-        if response.status_code == 200:
-            print("✅ Image et message envoyés avec succès !")
-        else:
-            print(f"Erreur envoi Telegram : {response.text}")
-    except Exception as e:
-        print(f"Erreur envoi photo : {e}")
+    if not image_url:
+        # Envoi du texte seul (si pas d'image dans l'article ou si l'image a échoué)
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {"chat_id": CHAT_ID, "text": caption, "parse_mode": "Markdown"}
+        try:
+            requests.post(url, json=payload, timeout=15)
+            print("✅ News texte envoyée !")
+        except Exception as e:
+            print(f"Erreur envoi texte : {e}")
 
 def main():
     articles = get_news()
@@ -118,37 +132,23 @@ def main():
         return
 
     print(f"🔎 Analyse de {len(articles)} news...")
+    
+    signaux_envoyes = 0
+    MAX_SIGNAUX = 3 # On s'arrête après 3 vrais buzz pour ne pas spammer
 
     for article in articles:
-        title = article["title"]
-        link = article["link"]
-        
-        print(f"🧐 Analyse : {title}")
-        tokens = analyze_and_generate(title)
-        
-        if not tokens:
-            print(f"❌ News ignorée : {title}")
-            continue
+        if signaux_envoyes >= MAX_SIGNAUX:
+            print("✋ Limite de 3 buzz atteinte. Fin du scan.")
+            break
 
-        caption = f"🚨 *SIGNAL HYPE* 🚨\n\n"
-        caption += f"*{title}*\n"
-        caption += f"[Lire l'article]({link})\n\n"
-        caption += f"💡 *Tokens suggérés :*\n"
-        for t in tokens:
-            caption += f"• *{t['name']}* (`{t['ticker']}`)\n"
+        title = article["title"]
+        print(f"🧐 Analyse : {title}")
         
-        first_token_name = tokens[0]['name']
-        image_bytes = generate_meme_image(title, first_token_name)
-        
-        if image_bytes:
-            send_photo_to_telegram(image_bytes, caption)
+        if is_viral_news(title):
+            send_to_telegram(title, article["link"], article["image_url"])
+            signaux_envoyes += 1
         else:
-            print("Envoi du texte seul (image échouée).")
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            requests.post(url, json={"chat_id": CHAT_ID, "text": caption, "parse_mode": "Markdown"})
-            
-        # Petite pause pour laisser respirer les APIs
-        time.sleep(2)
+            print("❌ Ignoré (pas viral).")
 
 if __name__ == "__main__":
     main()
