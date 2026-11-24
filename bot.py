@@ -16,9 +16,9 @@ def get_news():
     """Récupère les news les plus virales via des flux RSS ciblés."""
     articles = []
     rss_urls = [
-        "https://tmz.com/rss.xml", 
-        "https://nypost.com/entertainment/feed/", 
-        "http://www.espn.com/espn/rss/news" 
+        "https://tmz.com/rss.xml",
+        "https://nypost.com/entertainment/feed/",
+        "http://www.espn.com/espn/rss/news"
     ]
     
     for url in rss_urls:
@@ -74,18 +74,16 @@ Si ennuyeux : {{"score": 1, "tokens": []}}
         return None
 
 def generate_meme_image(prompt):
-    """Génère une image via l'endpoint public de Pollinations (gratuit)."""
+    """Génère une image via l'endpoint public de Pollinations (gratuit, 1 req/45s)."""
     encoded_prompt = urllib.parse.quote(prompt)
-    # Utilisation de l'URL publique qui fonctionne sans clé
     image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
     
     print(f"🎨 Génération de l'image pour : {prompt}")
     try:
-        # User-Agent pour éviter d'être bloqué par le serveur
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         response = requests.get(image_url, headers=headers, timeout=60)
         response.raise_for_status()
-        return response.content 
+        return response.content
     except Exception as e:
         print(f"Erreur génération image : {e}")
         return None
@@ -124,7 +122,6 @@ def main():
             print(f"❌ News ignorée : {title}")
             continue
 
-        # Construction du message texte
         caption = f"🚨 *SIGNAL HYPE* 🚨\n\n"
         caption += f"*{title}*\n"
         caption += f"[Lire l'article]({link})\n\n"
@@ -132,14 +129,13 @@ def main():
         for t in tokens:
             caption += f"• *{t['name']}* (`{t['ticker']}`)\n"
         
-        # Génération du prompt pour l'image
         image_prompt = f"A funny crypto meme coin illustration about {title}, featuring {tokens[0]['name']}, vibrant colors, internet culture style"
         image_bytes = generate_meme_image(image_prompt)
         
         if image_bytes:
             send_photo_to_telegram(image_bytes, caption)
-            # Pause de 15 secondes obligatoire pour respecter la limite de l'API gratuite
-            time.sleep(15)
+            # Pause obligatoire de 45 secondes pour respecter la limite de l'API
+            time.sleep(45)
         else:
             print("Envoi du texte seul (image échouée).")
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
