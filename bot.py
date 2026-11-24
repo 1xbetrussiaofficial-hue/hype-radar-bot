@@ -23,14 +23,15 @@ def get_real_trends():
     return trends_list[:15] # On regarde 15 tendances pour trouver les 2 meilleures
 
 def analyze_trend_with_ai(trend_title):
-    # Le prompt "Sniper" : strict mais créatif
-    prompt = f"""Tu es un trader de memecoins expert qui cherche le BUZZ absolu aux USA.
+    # Le prompt "Sniper" V2 : On cherche le drame et l'absurde, pas le sport normal
+    prompt = f"""Tu es un trader de memecoins expert sur Crypto Twitter. Tu cherches le BUZZ ABSOLU.
 Voici une tendance de recherche : "{trend_title}"
 
-Ta mission : Filtrer cette tendance.
-- Si c'est un sujet majeur (People comme Taylor Swift, Sport US majeur comme la NFL/NBA, Tech comme Elon Musk, Politique absurde, Fait divers choquant), c'est un OUI. Génère 3 memecoins (Nom + Ticker).
-- Si c'est un sujet de niche (match obscur, journaliste inconnu, finance ennuyeuse), c'est un NON. 
+Ta mission : Filtrer cette tendance de manière EXTRÊMEMENT STRICTE.
+- C'est un OUI (Score 9 ou 10) UNIQUEMENT si c'est : un clash entre célébrités, une déclaration folle d'Elon Musk ou Trump, un fait divers absurde, un scandale people, ou une tragédie qui fait tellement parler qu'elle en devient virale.
+- C'est un NON (Score 1) si c'est : un match de sport normal (ex: NBA, NFL de saison régulière), une blessure de sportif, une news de journaliste inconnu, de la finance, ou de la politique lourde.
 
+Si OUI, génère 3 memecoins (Nom + Ticker). 
 Format JSON STRICT :
 Si OUI : {{"score": 9, "tokens": [{{"name": "Nom", "ticker": "$TICKER"}}, ...]}}
 Si NON : {{"score": 1, "tokens": []}}
@@ -44,7 +45,7 @@ Si NON : {{"score": 1, "tokens": []}}
     payload = {
         "model": "openai/gpt-oss-120b", 
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.6, # Un peu moins créatif, plus analytique
+        "temperature": 0.5, # Très analytique, pas de fantaisie inutile
         "response_format": {"type": "json_object"}
     }
     
@@ -58,8 +59,8 @@ Si NON : {{"score": 1, "tokens": []}}
         content = data["choices"][0]["message"]["content"]
         result = json.loads(content)
         
-        # On ne garde que si le score est élevé (8, 9 ou 10)
-        if result.get("score", 0) >= 8:
+        # On ne garde que si le score est de 9 ou 10
+        if result.get("score", 0) >= 9:
             return result.get("tokens", [])
         return None
         
@@ -83,7 +84,7 @@ def main():
     print(f"🔎 Scan de {len(trends)} tendances pour trouver le vrai buzz...")
     
     signals_envoyes = 0
-    MAX_SIGNAUX = 2 # On s'arrête après 2 vrais signaux pour ne pas te spammer
+    MAX_SIGNAUX = 2
 
     for trend in trends:
         if signals_envoyes >= MAX_SIGNAUX:
