@@ -34,27 +34,47 @@ GOOGLE_NEWS_QUERIES = [
     "crypto hack",
     "goes viral",
 ]
-REDDIT_FEEDS = [
-    "https://www.reddit.com/r/news/hot/.rss?limit=15",
-    "https://www.reddit.com/r/CryptoCurrency/hot/.rss?limit=15",
-]
 BAD_WORDS = ["price prediction", "technical analysis", "how to buy", "price analysis", "sponsored"]
 
 
 # ---------- Mémoire anti-doublons ----------
 def load_seen():
+    """Renvoie (news déjà vues, titres des alertes déjà envoyées)."""
     try:
         with open(SEEN_FILE, "r", encoding="utf-8") as f:
-            seen = json.load(f)
-        now = time.time()
-        return {k: v for k, v in seen.items() if now - v < SEEN_TTL}
+            data = json.load(f)
     except Exception:
-        return {}
+        return {}, []
+    now = time.time()
+    alerts = [a for a in data.pop("_alerts", []) if now - a[1] < 24 * 3600]
+    seen = {k: v for k, v in data.items() if isinstance(v, (int, float)) and now - v < SEEN_TTL}
+    return seen, alerts
 
 
-def save_seen(seen):
+def save_seen(seen, alerts):
+    data = dict(seen)
+    data["_alerts"] = alerts
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
-        json.dump(seen, f)
+        json.dump(data, f)
+
+
+STOP_WORDS = {"the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "is", "are",
+              "his", "her", "its", "at", "by", "from", "as", "after", "over", "into", "news", "says"}
+
+
+def words(title):
+    title = title.rsplit(" - ", 1)[0]  # enlève le nom du média à la fin
+    return {w for w in re.findall(r"[a-z0-9]+", title.lower()) if len(w) > 2 and w not in STOP_WORDS}
+
+
+def same_story(title, alert_titles):
+    """Vrai si le titre parle de la même histoire qu'une alerte déjà envoyée."""
+    w1 = words(title)
+    for t in alert_titles:
+        w2 = words(t)
+        if w1 and w2 and len(w1 & w2) / min(len(w1), len(w2)) >= 0.5:
+            return True
+    return False
 
 
 def news_key(title):
@@ -101,8 +121,6 @@ def get_news():
         url = ("https://news.google.com/rss/search?q="
                + requests.utils.quote(f"{q} when:1h") + "&hl=en-US&gl=US&ceid=US:en")
         articles += get_rss(url, "Google News", limit=5)
-    for url in REDDIT_FEEDS:
-        articles += get_rss(url, "Reddit", limit=10)
 
     # Filtre de base + doublons dans le même passage
     clean, keys = [], set()
@@ -279,7 +297,7 @@ def main():
         print("❌ Secrets manquants (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, GROQ_API_KEY).")
         return
 
-    seen = load_seen()
+    seen, sent = load_seen()
     articles = [a for a in get_news() if a["key"] not in seen]
     print(f"🔎 {len(articles)} nouvelle(s) news à analyser.")
 
@@ -288,17 +306,22 @@ def main():
         if alerts >= MAX_ALERTS:
             break
         print(f"🧐 {article['title']}")
+        if same_story(article["title"], [t for t, _ in sent]):
+            seen[article["key"]] = time.time()
+            print("🔁 Même histoire qu'une alerte déjà envoyée, ignorée.")
+            continue
         ai = analyze_news(article["title"])
         if ai is None:
             continue  # erreur : on ne marque pas comme vue, on réessaiera
         seen[article["key"]] = time.time()
         if "ticker" in ai:
             send_alert(article, ai)
+            sent.append([article["title"], time.time()])
             alerts += 1
         else:
             print(f"❌ Ignorée (score {ai['score']}/10).")
 
-    save_seen(seen)
+    save_seen(seen, sent)
     print(f"Fin : {alerts} alerte(s) envoyée(s).")
 
 
