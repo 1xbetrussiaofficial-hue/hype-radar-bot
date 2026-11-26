@@ -15,7 +15,6 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 def get_og_image(url):
-    """Extrait l'image originale de l'article."""
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         res = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
@@ -27,8 +26,6 @@ def get_og_image(url):
     return None
 
 def check_dexscreener(ticker):
-    """Vérifie si le ticker existe déjà sur DexScreener et donne son volume."""
-    # On nettoie le ticker (on enlève le $)
     clean_ticker = ticker.replace("$", "").upper()
     url = f"https://api.dexscreener.com/latest/dex/search?q={clean_ticker}"
     
@@ -38,9 +35,8 @@ def check_dexscreener(ticker):
         pairs = data.get("pairs", [])
         
         if not pairs:
-            return "🆕 *Token introuvable sur DexScreener.* (Tu es le premier, avantage total !)"
+            return "🆕 *Token introuvable sur DexScreener.* (Tu es le premier !)"
             
-        # On cherche la paire avec le plus gros volume
         best_pair = max(pairs, key=lambda x: float(x.get("volume", {}).get("h24", 0) or 0))
         volume = float(best_pair.get("volume", {}).get("h24", 0) or 0)
         chain = best_pair.get("chainId", "Inconnue").capitalize()
@@ -51,8 +47,8 @@ def check_dexscreener(ticker):
         else:
             return f"⚠️ *Token existant mais faible volume.* {name} sur {chain} | Vol 24h: ${volume:,.0f}"
             
-    except Exception as e:
-        return "❓ *Impossible de vérifier DexScreener pour le moment.*"
+    except Exception:
+        return "❓ *Impossible de vérifier DexScreener.*"
 
 def get_news():
     articles = []
@@ -64,16 +60,9 @@ def get_news():
             data = response.json()
             for art in data.get("articles", []):
                 title = art.get("title", "")
-                
-                # Mots-clés OBLIGATOIRES (Hack, SEC, Elon, etc.)
-                must_have = ["hack", "scam", "sec", "elon", "musk", "trump", "lawsuit", "ban", "solana", "rug", "crash", "surge", "etf", "binance", "coinbase", "exploit", "whale"]
-                
-                if not any(word in title.lower() for word in must_have):
-                    continue
-                    
+                # On vire juste les analyses techniques pourries
                 if any(word in title.lower() for word in ["price prediction", "technical analysis", "how to buy"]):
                     continue
-
                 articles.append({"title": title, "link": art.get("link")})
     except Exception as e:
         print(f"Erreur API Crypto : {e}")
@@ -81,12 +70,13 @@ def get_news():
     return articles
 
 def analyze_news(title):
+    # L'IA fait le tri toute seule maintenant
     prompt = f"""Tu es un trader de memecoins "degen" sur Solana.
 Analyse ce titre : "{title}"
 
-RÈGLE 1 (FILTRE) : Si la news n'est pas liée à la crypto, réponds : {{"is_good": false}}
-RÈGLE 2 (BUZZ) : Si c'est un Hack, une Faillite, un Scandale, ou une action de la SEC : Explique "pourquoi ça marche" en 1 phrase courte.
-RÈGLE 3 (NOM) : Génère un nom de memecoin ULTRA DEGEN (max 3 mots) et un Ticker (4-5 lettres). 
+RÈGLE 1 (FILTRE) : Si la news n'est pas liée à la crypto ou si c'est une news de finance classique, réponds : {{"is_good": false}}
+RÈGLE 2 (BUZZ) : Si c'est un Hack, une Faillite, un Scandale, une action de la SEC, une annonce majeure, ou un drama Elon Musk/Trump : Explique "pourquoi ça marche" en 1 phrase courte.
+RÈGLE 3 (NOM) : Génère un nom de memecoin ULTRA DEGEN (max 3 mots) et un Ticker (4-5 lettres). Utilise le vocabulaire Crypto (Rekt, Fud, Dump, Moon, Inu, Chad).
 Exemple : "Binance hacked" -> Nom: "BinanceRekt" | Ticker: "$REKT"
 
 Format JSON STRICT :
@@ -117,11 +107,9 @@ Si bon : {{"is_good": true, "why": "Explication", "name": "Nom", "ticker": "$TIC
         return None
 
 def send_to_telegram(title, link, ai_data):
-    # 1. On vérifie DexScreener en direct
     print(f"🔎 Vérification DexScreener pour {ai_data['ticker']}...")
     dex_data = check_dexscreener(ai_data['ticker'])
 
-    # 2. On formate le message avec le résultat on-chain
     caption = f"🚨 *ALERTE MEMECOIN* 🚨\n"
     caption += f"*La News :* {title}\n"
     caption += f"*Pourquoi ça marche :* {ai_data['why']}\n\n"
@@ -155,24 +143,25 @@ def send_to_telegram(title, link, ai_data):
 def main():
     articles = get_news()
     if not articles: 
-        print("Aucune news crypto pertinente trouvée pour le moment.")
+        print("Aucune news trouvée par l'API.")
         return
 
-    print(f"🔎 Analyse de {len(articles)} news crypto...")
+    print(f"🔎 Analyse de {len(articles)} news...")
     alertes_envoyees = 0
 
     for article in articles:
-        if alertes_envoyees >= 3: # On réduit à 3 alertes max pour ne garder que le meilleur
+        if alertes_envoyees >= 3: # Max 3 alertes
             break
 
         title = article["title"]
+        print(f"🧐 Analyse : {title}")
         ai_data = analyze_news(title)
         
         if ai_data:
             send_to_telegram(title, article["link"], ai_data)
             alertes_envoyees += 1
         else:
-            print(f"❌ Ignoré : {title}")
+            print(f"❌ Ignoré par l'IA.")
 
 if __name__ == "__main__":
     main()
